@@ -1,0 +1,5 @@
+# Core dependencies for PPT template adapter
+python-pptx>=0.6.21
+lxml>=4.9
+Pillow>=9.0
+beautifulsoup4>=4.11

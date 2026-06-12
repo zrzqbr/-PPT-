@@ -1,6 +1,6 @@
 ---
 name: 腾讯云架构师长沙同盟PPT模板适配Skill
-version: "3.1"
+version: "3.2"
 description: 腾讯云架构师长沙同盟沙龙/技术分享 PPT 模板适配 Skill。锁定四项品牌资产——背景、字体、Logo、配色合规——其余内容、版式、图表、图片风格全部交由其他 PPT Skill 或讲师自由发挥。适用于（1）从主题/大纲生成新 PPT 后套用模板，或（2）将讲师/嘉宾已有 PPT 迁移到模板，或（3）将 HTML 内容直接转换为品牌合规 PPT。该 Skill 应在 PPT 生命周期的"最后一公里"被调用，作为模板适配层而非内容生成器。触发场景：基于腾讯云架构师长沙同盟模板生成沙龙 PPT、把 PPT 套到模板、嘉宾 PPT 换统一模板、HTML/网页/文章转 PPT、保留内容只替换背景/字体/Logo/配色、PPT 要符合腾讯云架构师长沙同盟模板规范。
 agent_created: true
 ---
@@ -44,7 +44,7 @@ agent_created: true
     - content 页：`logo-main.png` 放**右上角** `(x=14.60", y=0.49", w=4.88", h=0.53")`（logo-corner 已移除不再使用）
 15. **Logo 安全区**：封面/扉页左上角 0-5.60" x 0-1.20"、内容页右上角 14.50-20" x 0-1.10" 不得放置内容元素。
 16. **实测优先**：任何模板规范设定必须先解析模板 XML 实测，禁止凭直觉猜。
-17. **HTML→PPT 迁移铁律**：执行 HTML→PPT 转换时，必须严格遵守 §十三（26 条经验速查表）+ §十五 Checklist + §十六异常处理。生成后必须运行 `verify_output.py` 验证。
+17. **HTML→PPT 迁移铁律**：执行 HTML→PPT 转换时，**必须先走 §十五阶段零**判定自动/手动路线，然后严格遵守 §十三（35 条经验）+ §十五 Checklist + §十六异常处理。生成后必须运行 `verify_output.py` 验证。手动构建时必须从 §13.31 复用标准辅助函数模板，禁止重新实现。
 
 ---
 
@@ -507,7 +507,7 @@ darkBlue = "08194B"     # 根本没查规范，用了禁用色
 
 ---
 
-## 十三、HTML→PPT 迁移经验库（26 条，含完整代码示例）
+## 十三、HTML→PPT 迁移经验库（35 条，含完整代码示例）
 
 > ⚠️ **这是从实际迁移失败中提炼的铁律，每条都带代码。执行 HTML→PPT 迁移时必须逐条遵守。**
 > 配合 §十五 Checklist 执行。
@@ -1010,6 +1010,322 @@ shape.adjustments[0] = 0.04  # 按上表设置
 
 ---
 
+### 第四部分：高保真手动构建 HTML→PPT 的实战坑（§13.27~13.35）
+
+> ⚠️ 以下经验来自 2026-06-11 迁移「深耕光电-数智无疆-AI重构美亚智造新范式.html」时的实际失误。
+> 该 HTML 包含 scene-card / product-card / sales-flow / timeline / roadmap / question-card / kpi-row / stat-block 等自定义 CSS class，
+> `html_to_pptx.py` 的自动映射无法识别这些结构，必须编写专用脚本逐页手动构建。
+
+#### 13.27 自动脚本对自定义 CSS class 的致命盲区
+
+**问题**：`html_to_pptx.py` 只识别有限的 CSS class（card / card-row / two-col / flow-row / highlight-box / prob-row / info-card / gpt-letters / policy-grid / summary-grid 等共约 16 种）。当 HTML 使用自定义 class 时（如 scene-card / sales-flow / sales-step / product-card / timeline / kpi-row / stat-block / roadmap / roadmap-phase / question-card / banner / grid-2 / grid-3 / compact-column），这些元素的内容**全部被跳过**，PPT 只剩纯文字堆砌。
+
+**判断标准**：在运行自动脚本前，先扫描 HTML 中的所有 class，与 `html_to_pptx.py` 支持的 class 列表做交集。如果匹配率低于 60%，**直接放弃自动脚本**，改用手动逐页构建。
+
+**自动扫描代码**：
+
+```python
+from bs4 import BeautifulSoup
+import re
+
+SUPPORTED_CLASSES = {
+    'card', 'card-row', 'two-col', 'flow-row', 'highlight-box',
+    'prob-row', 'info-card', 'gpt-letters', 'policy-grid',
+    'summary-grid', 'slide', 'title-page', 'slide-center',
+    'col-text', 'col-list', 'col'
+}
+
+def scan_html_class_coverage(html_content: str) -> float:
+    """返回 HTML class 与自动脚本支持 class 的匹配率 (0~1)"""
+    soup = BeautifulSoup(html_content, 'lxml')
+    all_classes = set()
+    for tag in soup.find_all(True, class_=True):
+        for cls in tag.get('class', []):
+            all_classes.add(cls)
+    if not all_classes:
+        return 0.0
+    matched = all_classes & SUPPORTED_CLASSES
+    return len(matched) / len(all_classes)
+```
+
+**铁律**：匹配率 < 60% → 手动构建；60%~85% → 自动脚本 + 手动补缺页；> 85% → 自动脚本即可。
+
+#### 13.28 Python 字符串中嵌套中文引号导致 SyntaxError
+
+**问题**：手动构建脚本中，中文内容经常包含中文引号 `"..."` 和 `'...'`（U+201C/U+201D/U+2018/U+2019）。当这些内容被放在 Python 的 `"..."` 双引号字符串中时：
+- 中文左双引号 `"` (U+201C) 和右双引号 `"` (U+201D) 在某些环境下会导致 `SyntaxError: invalid character`
+- 更隐蔽的情况：中文双引号 `""...""` 恰好形成了 Python 空字符串 + 裸中文文本 + 另一个空字符串的误解析
+
+**修复规则**：
+
+```python
+# ❌ 错误写法 - 中文引号可能与 Python 引号冲突
+title = "从"卖设备"到"持续交付 AI 能力""
+
+# ✅ 正确写法 1 - 外层用单引号包裹
+title = '从"卖设备"到"持续交付 AI 能力"'
+
+# ✅ 正确写法 2 - 用英文引号替代中文引号
+title = '从"卖设备"到"持续交付 AI 能力"'
+
+# ✅ 正确写法 3 - 中文引号用 unicode 转义
+title = "从\u201c卖设备\u201d到\u201c持续交付 AI 能力\u201d"
+```
+
+**铁律**：在手动构建脚本中，**所有包含中文引号的字符串，外层必须用单引号 `'...'` 包裹**。写完后必须运行 `py_compile.compile()` 做语法检查，再执行脚本。
+
+#### 13.29 RGBColor 对象的 RGB 分量访问方式
+
+**问题**：`pptx.dml.color.RGBColor` 对象**没有** `.red` / `.green` / `.blue` 属性。写 `color.red` 会报 `AttributeError: 'RGBColor' object has no attribute 'red'`。
+
+**修复**：RGBColor 的 RGB 分量通过**索引**访问：
+
+```python
+from pptx.dml.color import RGBColor
+
+color = RGBColor(0xFF, 0x80, 0x40)
+
+# ❌ 错误
+r, g, b = color.red, color.green, color.blue
+
+# ✅ 正确
+r, g, b = color[0], color[1], color[2]
+
+# 实际用例：生成浅色背景（tag pill）
+light_bg = RGBColor(
+    min(255, color[0] + 200),
+    min(255, color[1] + 200),
+    min(255, color[2] + 200)
+)
+```
+
+#### 13.30 字号下限与验证脚本的 12pt 硬门槛
+
+**问题**：手动构建时为了视觉效果，标签药丸(tag pill)、副标题等元素使用了 11pt 小字号。但 `verify_output.py` 验证脚本有 **12pt 最低字号** 的硬性检查——任何小于 12pt 的文字都会报 ERROR。
+
+**修复规则**：
+- **所有文字元素字号不得低于 12pt**，这是验证脚本的硬门槛
+- 即使是 tag pill、阶段编号(PHASE 01)、里程碑描述等小型文字，也必须 ≥12pt
+- 如果 12pt 视觉上太大，通过缩短文字或减小元素尺寸来补偿，而不是降低字号
+
+```python
+# ❌ 错误 - 11pt 会被验证脚本报 ERROR
+_set_font(run, FONT_W7, 11, True, color)
+
+# ✅ 正确 - 最低 12pt
+_set_font(run, FONT_W7, 12, True, color)
+```
+
+#### 13.31 手动构建脚本的标准代码模板
+
+**问题**：每次手动构建都从零开始写辅助函数（`_set_font` / `_add_bg` / `_add_logo` / `_add_text_box` / `_add_rounded_rect` / `_add_card` 等），容易遗漏关键细节（如 `a:ea` XML 设置、z-order 调整等）。
+
+**修复**：以下是经过验证的标准辅助函数模板，新的手动构建脚本**必须复用**这套函数，不要重新实现：
+
+```python
+def _set_font(run, font_name, size_pt, bold=False, color=None, align=None):
+    """设置字体 - 同时设置 a:latin + a:ea（§13.21 铁律）"""
+    run.font.size = Pt(size_pt)
+    run.font.bold = bold
+    if color:
+        run.font.color.rgb = color
+    rPr = run._r.get_or_add_rPr()
+    for tag in ('a:latin', 'a:ea'):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = etree.SubElement(rPr, qn(tag))
+        el.set('typeface', font_name)
+
+def _add_bg(slide, bg_path):
+    """添加背景图并移到 z-order 最底层（§13.22 铁律）"""
+    pic = slide.shapes.add_picture(str(bg_path), 0, 0, SLIDE_W, SLIDE_H)
+    sp_tree = slide.shapes._spTree
+    pic_elem = pic._element
+    sp_tree.remove(pic_elem)
+    sp_tree.insert(2, pic_elem)
+
+def _add_logo(slide, is_cover=False):
+    """添加 Logo（封面左上，内容页右上）（§铁律14）"""
+    if is_cover:
+        slide.shapes.add_picture(str(LOGO_MAIN),
+            Inches(0.65), Inches(0.61), Inches(4.88), Inches(0.53))
+    else:
+        slide.shapes.add_picture(str(LOGO_MAIN),
+            Inches(14.60), Inches(0.49), Inches(4.88), Inches(0.53))
+
+def _add_text_box(slide, left, top, width, height, text,
+                  font_name, size_pt, bold=False, color=None, align=None):
+    """添加文本框"""
+    txBox = slide.shapes.add_textbox(left, top, width, height)
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    if align:
+        p.alignment = align
+    run = p.add_run()
+    run.text = text
+    _set_font(run, font_name, size_pt, bold, color)
+    return txBox
+
+def _add_rounded_rect(slide, left, top, width, height,
+                      fill_color=None, border_color=None, radius=0.04):
+    """添加圆角矩形（§13.25 标准圆角值）"""
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
+    if fill_color:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill_color
+    else:
+        shape.fill.background()
+    if border_color:
+        shape.line.color.rgb = border_color
+        shape.line.width = Pt(1)
+    else:
+        shape.line.fill.background()
+    shape.adjustments[0] = radius
+    return shape
+
+def _add_card(slide, left, top, width, height, title, body,
+              title_color=C_BRAND_GREEN, body_color=C_DARK,
+              bg_color=C_CARD_BG, border_color=C_CARD_BORDER):
+    """添加标准内容卡片（圆角矩形 + 标题 + 正文）"""
+    card = _add_rounded_rect(slide, left, top, width, height,
+                             bg_color, border_color, 0.04)
+    # 标题
+    _add_text_box(slide, left + Inches(0.3), top + Inches(0.2),
+                  width - Inches(0.6), Inches(0.5),
+                  title, FONT_W7, 18, True, title_color)
+    # 正文
+    _add_text_box(slide, left + Inches(0.3), top + Inches(0.7),
+                  width - Inches(0.6), height - Inches(1.0),
+                  body, FONT_W3, 14, False, body_color)
+    return card
+```
+
+#### 13.32 手动构建脚本的整体架构模式
+
+**问题**：手动构建脚本结构混乱，函数名不统一，没有标准的执行流程。
+
+**修复**：标准架构如下：
+
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+高保真 HTML→PPT 转换：[文件名]
+逐页手动构建，套用腾讯云架构师长沙同盟模板品牌四件套
+"""
+
+# 1. 标准导入
+from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.oxml.ns import qn
+from lxml import etree
+
+# 2. 品牌常量（从 SKILL.md §二.14 / §四 / §六 复制）
+
+# 3. 标准辅助函数（从 §13.31 复制）
+
+# 4. 每页构建函数：build_slide_N_xxx(prs) -> slide
+#    命名规则：build_slide_{页码}_{页面简称}
+#    每个函数内部：创建 slide → 添加背景 → 添加 Logo → 添加内容
+
+# 5. 主函数
+def main():
+    prs = Presentation()
+    prs.slide_width = SLIDE_W
+    prs.slide_height = SLIDE_H
+    blank = prs.slide_layouts[6]  # 空白版式
+
+    build_slide_1_cover(prs, blank)
+    build_slide_2_toc(prs, blank)
+    # ... 所有页面
+
+    output_path = "xxx_长沙模板适配v2.pptx"
+    prs.save(output_path)
+    print(f"已保存：{output_path}")
+
+if __name__ == '__main__':
+    main()
+```
+
+**关键**：每个 `build_slide_N_xxx()` 函数**必须**按固定顺序执行：① 创建 slide → ② `_add_bg()` → ③ `_add_logo()` → ④ 添加内容元素。
+
+#### 13.33 py_compile 语法预检是手动脚本的第一道门
+
+**问题**：手动构建脚本通常有 500~1000+ 行，直接运行如果报 SyntaxError 只能看到一个错误位置，修完后可能还有下一个。反复运行调试浪费大量时间。
+
+**修复**：脚本写完后，在首次运行前**必须**先执行语法预检：
+
+```python
+import py_compile
+py_compile.compile('convert_xxx.py', doraise=True)
+print('Syntax OK')
+```
+
+只有语法预检通过后，才能执行脚本。如果预检报错，先修完**所有**语法错误再运行。
+
+**常见语法陷阱清单**：
+- 中文引号 `"..."` 在 Python `"..."` 字符串中（见 §13.28）
+- 中文全角逗号 `，` 在非字符串区域
+- f-string 中的花括号 `{` `}` 未转义（应写 `{{` `}}`）
+- 多行字符串的缩进不一致
+- 三引号 `"""` 的配对错误
+
+#### 13.34 何时用自动脚本 vs 何时用手动构建（决策树）
+
+**问题**：面对新的 HTML→PPT 迁移任务，不知道该用自动脚本还是手动构建，导致先跑自动脚本浪费时间、输出质量差、用户不满意。
+
+**决策树**：
+
+```
+输入 HTML
+  │
+  ├─ 有 3+ 个 div.slide ? ──── 是 → 幻灯片型 HTML
+  │                                    │
+  │                                    ├─ class 匹配率 > 85% ? → 自动脚本 apply_template.py
+  │                                    ├─ class 匹配率 60~85% ? → 自动脚本 + 手动补缺页
+  │                                    └─ class 匹配率 < 60% ? → **手动构建**
+  │
+  └─ 否 → 文章型 HTML → 自动脚本（走 parse_html + 智能分页）
+```
+
+**手动构建的触发信号**（有任意一条就应手动）：
+1. HTML 使用了大量自定义 CSS class（scene-card / product-card / timeline 等）
+2. 页面包含复杂的可视化元素（流程图 / 路线图 / KPI 统计块 / 对比矩阵）
+3. 每页的布局差异很大（不是统一的"标题+正文"模式）
+4. 用户反馈自动转换"差距太大"
+
+#### 13.35 手动构建后必须执行的验证清单
+
+**问题**：手动构建脚本运行成功不代表 PPT 质量过关——字号可能不合规、Logo 可能缺失、背景可能被遮挡。
+
+**修复**：手动构建完成后，**必须**执行以下验证链：
+
+```bash
+# 1. 语法预检（写完代码后立即执行）
+python -c "import py_compile; py_compile.compile('convert_xxx.py', doraise=True); print('Syntax OK')"
+
+# 2. 运行脚本生成 PPT
+python convert_xxx.py
+
+# 3. 运行验证脚本（必须全 PASS）
+python scripts/verify_output.py --pptx output.pptx
+
+# 4. 如果有 ERROR → 修复后重新生成 → 重新验证，直到全 PASS
+```
+
+**验证脚本检查项**：
+- 每页 shapes 数量 ≥ 3（至少有背景 + Logo + 内容）
+- 所有字号 ≥ 12pt（硬门槛，见 §13.30）
+- Logo 存在且位置正确（封面左上 / 内容页右上）
+- 背景图/填充存在（不能有空白页）
+
+---
+
 ## 十四、写作与执行风格
 
 - **铁律优先于自由发挥**
@@ -1023,7 +1339,16 @@ shape.adjustments[0] = 0.04  # 按上表设置
 
 > ⚠️ **每次执行 HTML→PPT 迁移时，必须按此 Checklist 逐项检查**。这不是建议，是强制流程。
 
-### 阶段一：编码前审查（写代码前必须确认）
+### 阶段零：方案选择（最先执行，决定走自动还是手动）
+
+- [ ] 扫描 HTML 中所有 CSS class，计算与 `html_to_pptx.py` 支持列表的匹配率（§13.27）
+- [ ] 匹配率 > 85% → 走自动脚本（阶段一~四）
+- [ ] 匹配率 60~85% → 走自动脚本 + 识别缺失页面后手动补建
+- [ ] 匹配率 < 60% → **跳过自动脚本，直接手动构建**（阶段五~七）
+- [ ] 检查是否有复杂可视化元素（流程图 / 路线图 / KPI / 对比矩阵 / 时间线）→ 有则倾向手动
+- [ ] 检查每页布局是否高度差异化（不是统一"标题+正文"模式）→ 是则倾向手动
+
+### 阶段一：编码前审查（写代码前必须确认）——适用于自动脚本
 
 - [ ] `_add_structured_slide()` 中所有结构类型（cards/columns/policy_cards/summary_cards/highlights/prob_charts/info_cards/gpt_letters/inline_flex_blocks）是否使用**独立 if 块**而非 elif 链？（§13.1）
 - [ ] 渲染顺序是否为：highlights → gpt_letters/flex → cards → columns → policy_cards → summary_cards → raw_text → flow → prob → info？（§13.2）
@@ -1065,6 +1390,33 @@ python scripts/verify_output.py --pptx output.pptx --html source.html --strict
 - [ ] PPT 页数与 HTML 页数大致匹配（差异 <30%）
 
 如脚本报 ERROR → 必须修复后重新生成。报 WARN → 人工确认是否需要修复。
+
+### 阶段五：手动构建——编码规范（阶段零判定为手动时执行）
+
+- [ ] 辅助函数是否从 §13.31 标准模板复制？（不要重新实现）
+- [ ] `_set_font()` 是否同时设置了 `a:ea` + `a:latin` XML？（§13.21 + §13.31）
+- [ ] `_add_bg()` 是否在添加背景图后执行了 `sp_tree.insert(2, pic_elem)`？（§13.22 + §13.31）
+- [ ] 所有包含中文引号 `"..."` 的字符串，外层是否用**单引号** `'...'` 包裹？（§13.28）
+- [ ] RGBColor 的分量访问是否用 `color[0]` `color[1]` `color[2]` 而非 `.red` `.green` `.blue`？（§13.29）
+- [ ] 所有字号是否 ≥ 12pt？（§13.30，验证脚本硬门槛）
+- [ ] 每个 `build_slide_N_xxx()` 函数是否按固定顺序：创建 slide → `_add_bg()` → `_add_logo()` → 内容？（§13.32）
+
+### 阶段六：手动构建——语法预检（写完代码后、运行前必须执行）
+
+```bash
+python -c "import py_compile; py_compile.compile('convert_xxx.py', doraise=True); print('Syntax OK')"
+```
+
+- [ ] `py_compile` 语法检查是否通过？（§13.33）
+- [ ] 如果报错，是否修完**所有**语法错误后才运行脚本？（不要一个一个修-运行-修-运行）
+
+### 阶段七：手动构建——生成与验证（语法预检通过后执行）
+
+- [ ] 运行脚本生成 PPT
+- [ ] 运行 `verify_output.py --pptx output.pptx` 验证
+- [ ] 验证结果是否全 PASS？（§13.35）
+- [ ] 如有 ERROR → 修复 → 重新生成 → 重新验证（循环直到全 PASS）
+- [ ] 交付前确认 PPT 页数与 HTML 页数一致
 
 ---
 
@@ -1118,6 +1470,7 @@ python scripts/verify_output.py --pptx output.pptx --html source.html --strict
 | v2.0 | 2026-06 | 新增 HTML→PPT 能力（16种元素映射），新增 6 种结构化元素解析 |
 | v3.0 | 2026-06-10 | 修复渲染互斥/重复提取/字体比例，新增 26 条经验库 + Checklist + 异常处理 + 验证脚本 |
 | v3.1 | 2026-06-11 | §13 恢复为完整版（含代码示例），确保 AI 加载时一次性获得全部实现细节 |
+| v3.2 | 2026-06-11 | 新增 §13.27~13.35（9 条手动构建经验：CSS class 盲区/中文引号 SyntaxError/RGBColor 索引/12pt 硬门槛/标准辅助函数模板/脚本架构/py_compile 预检/自动vs手动决策树/验证清单）+ §十五新增阶段零（方案选择）和阶段五~七（手动构建专用 Checklist）+ 铁律 17 更新 |
 
 详细变更日志见 `references/changelog-v1-v5.md`。
 
