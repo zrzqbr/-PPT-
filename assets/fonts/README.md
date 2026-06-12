@@ -1,22 +1,28 @@
-# 字体安装说明（已内置）
+# 字体说明
 
-本 Skill 已**内置官方腾讯体字体文件**（TTF + OTF 双格式），位于本目录：
+本 Skill 已内置腾讯体字体文件（TTF 格式），位于本目录：
 
 | 文件 | 说明 |
 | --- | --- |
-| `TencentSans-W3.ttf` | 腾讯体 W3 常规体，TTF 格式（推荐） |
-| `TencentSans-W7.ttf` | 腾讯体 W7 粗体，TTF 格式（推荐） |
-| `TencentSans-W3.otf` | 腾讯体 W3 常规体，OTF 格式（备用） |
-| `TencentSans-W7.otf` | 腾讯体 W7 粗体，OTF 格式（备用） |
+| `TencentSans-W3.ttf` | 腾讯体 W3 常规体（正文用） |
+| `TencentSans-W7.ttf` | 腾讯体 W7 粗体（标题用） |
 
-## ✅ 必须使用的字体名（family name）
+## 版权声明
+
+> **TencentSans 字体版权归深圳市腾讯计算机系统有限公司所有。**
+>
+> 本项目引用该字体仅用于腾讯云架构师技术同盟沙龙的 PPT 品牌适配技术演示。
+> 如需将本字体用于其他商业用途，请遵循腾讯官方字体授权协议。
+> 字体下载及授权详情请参考：https://tecdn.qq.com/tdesign/download/brand/TencentSans.zip
+
+## 必须使用的字体名（family name）
 
 在生成 PPT 时，**只能使用以下两个 family name**，不要用其他写法：
 
 - `TencentSans W3`（正文，中间一个空格）
 - `TencentSans W7`（标题，中间一个空格）
 
-## ❌ 不要使用的写法
+## 不要使用的写法
 
 | 错误写法 | 原因 |
 | --- | --- |
